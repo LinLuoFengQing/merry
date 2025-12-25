@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D Circular Christmas Tree - Balanced Names</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Great+Vibes&display=swap" rel="stylesheet">
+    <style>
+        body {
+            background-color: #010409;
+            margin: 0;
+            overflow: hidden;
+            font-family: 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+            touch-action: none;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #loading {
+            position: absolute;
+            color: white;
+            font-weight: bold;
+            pointer-events: none;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 12px 24px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            z-index: 200;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+
+        /* 橫屏引導遮罩 */
+        #orientation-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: #010409;
+            color: white;
+            z-index: 9999;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+        }
+
+        /* 當裝置為直向時，且寬度小於一定數值（手機/平板）時顯示 */
+        @media screen and (orientation: portrait) and (max-width: 1024px) {
+            #orientation-overlay {
+                display: flex;
+            }
+        }
+
+        .phone-icon {
+            width: 50px;
+            height: 80px;
+            border: 3px solid white;
+            border-radius: 8px;
+            margin-bottom: 24px;
+            position: relative;
+            animation: rotatePhone 2s ease-in-out infinite;
+        }
+
+        .phone-icon::after {
+            content: '';
+            position: absolute;
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 6px;
+            height: 6px;
+            background: white;
+            border-radius: 50%;
+        }
+
+        @keyframes rotatePhone {
+            0% { transform: rotate(0deg); }
+            50% { transform: rotate(-90deg); }
+            100% { transform: rotate(-90deg); }
+        }
+
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<!-- 橫屏引導遮罩 -->
+<div id="orientation-overlay">
+    <div class="phone-icon"></div>
+    <h2 class="text-2xl font-bold mb-4">請旋轉您的螢幕</h2>
+    <p class="text-gray-400 max-w-xs">為了獲得最佳的 3D 粒子視覺體驗與全景效果，請使用橫向模式觀看。</p>
+</div>
+
+<div id="container">
+    <div id="loading">✨ 正在編織聖誕祝願...</div>
+    <canvas id="treeCanvas"></canvas>
+</div>
+
+<script>
+    const canvas = document.getElementById('treeCanvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const loading = document.getElementById('loading');
+
+    const namePool = [
+        "Mr.Liang", "林子铃", "林简妍", "潘舒丽", "伍金贤", "林思妤", "Ms.Wei", "Ms.Qadri", "Mr.Stephens", "Mr.Zhang",
+        "Ms.Yang", "杨琰蕾", "宋洁", "Xintong", "Sara", "Yangming", "Meilin", "Senmi", "Hengzheng", "YiLin",
+        "vivian", "mengzhen", "Rushi", "Yufei", "Sarah", "Baifeng", "Kengyi", "Zhengwei", "Weicheng", "Junjie",
+        "Fengtao", "Chengjun", "心蕾同学", "王敷春", "林羽彤", "倪嘉欣", "Weiwen", "Yongying", "陈皓轩", "伍均浩",
+        "原瑛婷", "郑若晞", "胡子涵", "泺羽", "姜瑾萱", "余映慧", "Linda Lin", "李婉莹", "林宇泽", "Denise Wu",
+        "朱佳欣", "林俊文", "Chenhe Liang", "陈可妍", "Linjianyan", "宋婕", "LiuJing", "陈靖榕", "Marco", "王圣毅",
+        "Tongcan Ye", "Xinyan Liu", "李妙言", "Haoyang", "Huanqiang Li ", "慧琪", "ljh", "王嘉豪", "JiaXin Ni ", "李俊成",
+        "张伟杰", "孫祥驍", "方杏娉", "Xinyi Chen", "劉憶", "林楨", "林子涵", "王冰心", "M0eiqi","Yixuan"
+    ];
+
+    const nameDisplayCounts = {};
+    namePool.forEach(name => nameDisplayCounts[name] = 0);
+
+    let activeNames = new Set();
+    let width, height, isMobile;
+    let nameGroups = []; 
+    let snowflakes = [];
+    let orbitParticles = [];
+    let rotationAngle = 0;
+    let mouse = { x: -1000, y: -1000, radius: 80 };
+    let flickeringCount = 0; 
+
+    function getBalancedName() {
+        const availableNames = namePool.filter(n => !activeNames.has(n));
+        if (availableNames.length === 0) return namePool[0]; 
+
+        let minCount = Infinity;
+        availableNames.forEach(n => {
+            if (nameDisplayCounts[n] < minCount) minCount = nameDisplayCounts[n];
+        });
+
+        const candidates = availableNames.filter(n => nameDisplayCounts[n] === minCount);
+        const selected = candidates[Math.floor(Math.random() * candidates.length)];
+        
+        nameDisplayCounts[selected]++;
+        return selected;
+    }
+
+    window.addEventListener('mousemove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
+    window.addEventListener('touchstart', e => { 
+        mouse.x = e.touches[0].clientX; 
+        mouse.y = e.touches[0].clientY; 
+    }, { passive: true });
+    window.addEventListener('touchmove', e => {
+        mouse.x = e.touches[0].clientX;
+        mouse.y = e.touches[0].clientY;
+    }, { passive: true });
+    window.addEventListener('touchend', () => {
+        mouse.x = -1000;
+        mouse.y = -1000;
+    });
+
+    class Particle {
+        constructor(x, y, relativeX, relativeY, parentGroup, colorType) {
+            this.x = Math.random() * width;
+            this.y = Math.random() * height;
+            this.relX = relativeX; 
+            this.relY = relativeY;
+            this.parent = parentGroup;
+            this.colorType = colorType; 
+            this.vx = (Math.random() - 0.5) * 4;
+            this.vy = (Math.random() - 0.5) * 4;
+            this.acc = 0.22;
+            this.friction = 0.85;
+            this.size = (colorType === 'ribbon') ? 1.4 : (colorType === 'header' ? 1.4 : (isMobile ? 0.85 : 1.15));
+        }
+
+        update() {
+            const isCenter = this.parent.radius === 0;
+            const rotationScale = isCenter ? 0.05 : 1.0;
+            const angle = this.parent.baseAngle + (rotationAngle * rotationScale);
+            const cosA = Math.cos(angle);
+            const sinA = Math.sin(angle);
+
+            const centerX = width / 2 + (this.parent.radius * cosA);
+            const z = this.parent.radius * sinA;
+
+            const targetX = centerX + this.relX;
+            const targetY = this.parent.baseY + this.relY;
+
+            this.vx += (targetX - this.x) * this.acc;
+            this.vy += (targetY - this.y) * this.acc;
+
+            let mdx = mouse.x - this.x;
+            let mdy = mouse.y - this.y;
+            let mdist = Math.sqrt(mdx * mdx + mdy * mdy);
+            
+            if (mdist < mouse.radius) {
+                let mforce = (mouse.radius - mdist) / mouse.radius;
+                this.vx -= (mdx / mdist) * mforce * 15;
+                this.vy -= (mdy / mdist) * mforce * 15;
+            }
+
+            this.vx *= this.friction;
+            this.vy *= this.friction;
+            this.x += this.vx;
+            this.y += this.vy;
+            return z; 
+        }
+
+        draw(z) {
+            const maxZ = 300;
+            const normalizedZ = (z + maxZ) / (maxZ * 2); 
+            let opacity = (0.4 + normalizedZ * 0.6) * this.parent.opacity; 
+            
+            if (this.colorType === 'star') ctx.fillStyle = `rgba(255, 230, 80, ${opacity})`;
+            else if (this.colorType === 'ribbon') {
+                ctx.fillStyle = `rgba(255, 215, 0, ${Math.min(1.0, opacity * 0.8)})`; 
+            }
+            else if (this.colorType === 'header') ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`; 
+            else if (this.colorType === 'trunk') ctx.fillStyle = `rgba(100, 60, 30, ${opacity * 0.7})`;
+            else ctx.fillStyle = `rgba(230, 250, 255, ${opacity})`; 
+            
+            ctx.beginPath();
+            ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    class NameGroup {
+        constructor(text, baseAngle, radius, baseY, fontSize, colorType, isDynamic = false) {
+            this.text = text;
+            this.baseAngle = baseAngle;
+            this.radius = radius;
+            this.baseY = baseY;
+            this.fontSize = fontSize;
+            this.colorType = colorType;
+            this.particles = [];
+            this.opacity = 1.0;
+            this.isDynamic = isDynamic;
+            
+            this.timer = Math.random() * 3000; 
+            this.state = 'visible'; 
+            this.switchThreshold = 6000 + Math.random() * 4000; 
+
+            if (text && text !== "⭐" && !text.includes("\n") && colorType !== 'trunk') {
+                activeNames.add(text);
+            }
+        }
+
+        async initParticles() {
+            this.particles = await getNameParticles(this.text, this, this.fontSize, this.colorType);
+        }
+
+        update(deltaTime) {
+            if (!this.isDynamic) return;
+
+            if (this.state === 'visible') {
+                this.timer += deltaTime;
+                if (this.timer > this.switchThreshold && flickeringCount < 3) {
+                    this.state = 'fadingOut';
+                    flickeringCount++;
+                }
+            } else if (this.state === 'fadingOut') {
+                this.opacity -= 0.02; 
+                if (this.opacity <= 0) {
+                    this.opacity = 0;
+                    this.switchName(); 
+                    this.state = 'fadingIn';
+                }
+            } else if (this.state === 'fadingIn') {
+                this.opacity += 0.02;
+                if (this.opacity >= 1) {
+                    this.opacity = 1;
+                    this.state = 'visible';
+                    this.timer = 0;
+                    this.switchThreshold = 6000 + Math.random() * 4000;
+                    flickeringCount = Math.max(0, flickeringCount - 1);
+                }
+            }
+        }
+
+        async switchName() {
+            activeNames.delete(this.text);
+            const nextName = getBalancedName();
+            this.text = nextName;
+            activeNames.add(this.text);
+            this.particles = await getNameParticles(this.text, this, this.fontSize, this.colorType);
+        }
+    }
+
+    async function createTree() {
+        if (loading) loading.classList.remove('hidden');
+        nameGroups = [];
+        activeNames.clear();
+        isMobile = width < 768;
+
+        const treeTopY = height * 0.22; 
+        const treeBottomTargetY = height * 0.75; 
+        const availableHeight = treeBottomTargetY - treeTopY;
+        const maxTreeRadius = Math.min(width * 0.35, isMobile ? 120 : 180); 
+
+        // 1. 固定頂部裝飾
+        const header = new NameGroup("Merry Christmas", 0, 0, treeTopY - (isMobile ? 55 : 80), isMobile ? 32 : 54, 'header');
+        await header.initParticles();
+        nameGroups.push(header);
+
+        const star = new NameGroup("⭐", 0, 0, treeTopY - (isMobile ? 25 : 40), isMobile ? 28 : 42, 'star');
+        await star.initParticles();
+        nameGroups.push(star);
+
+        const first = new NameGroup("Mr.Liang", 0, 0, treeTopY + 5, isMobile ? 18 : 24, 'name');
+        await first.initParticles();
+        nameGroups.push(first);
+
+        // 2. 動態名字位置 (樹身)
+        const rowCount = isMobile ? 9 : 12; 
+        const rowHeight = availableHeight / rowCount;
+        let currentY = treeTopY + (isMobile ? 50 : 70); 
+
+        for (let r = 0; r < rowCount; r++) {
+            const progress = (currentY - treeTopY) / availableHeight;
+            const currentRadius = Math.max(isMobile ? 45 : 70, progress * maxTreeRadius);
+            
+            let posInRow = 1;
+            if (progress > 0.2) posInRow = 2;
+            if (progress > 0.6) posInRow = isMobile ? 2 : 3; 
+            if (progress > 0.85) posInRow = isMobile ? 3 : 4; 
+
+            for (let i = 0; i < posInRow; i++) {
+                const angle = (i / posInRow) * Math.PI * 2 + (r * 0.8);
+                const initialName = getBalancedName();
+                const group = new NameGroup(initialName, angle, currentRadius, currentY, isMobile ? 14 : 16, 'name', true);
+                await group.initParticles();
+                nameGroups.push(group);
+            }
+            currentY += rowHeight;
+        }
+
+        // 3. 樹幹 (Trunk)
+        const trunkHeight = isMobile ? 40 : 60;
+        const trunkWidth = isMobile ? 20 : 30;
+        for (let ty = 0; ty < trunkHeight; ty += 5) {
+            const trunkRow = { 
+                baseAngle: 0, 
+                radius: 0, 
+                baseY: treeBottomTargetY + ty, 
+                particles: [], 
+                opacity: 0.8 
+            };
+            for (let tx = -trunkWidth/2; tx < trunkWidth/2; tx += 3) {
+                trunkRow.particles.push(new Particle(0, 0, tx, 0, trunkRow, 'trunk'));
+            }
+            nameGroups.push(trunkRow);
+        }
+
+        // 4. 固定底部祝語
+        const footer = new NameGroup("感謝各位的文章\n聖誕節快樂🎉", 0, 0, treeBottomTargetY + trunkHeight + (isMobile ? 30 : 50), isMobile ? 15 : 20, 'name');
+        await footer.initParticles();
+        nameGroups.push(footer);
+
+        // 5. 螺旋絲帶
+        const ribbonTotal = isMobile ? 1200 : 2200; 
+        for(let i=0; i < ribbonTotal; i++) {
+            const progress = i / ribbonTotal;
+            const angle = progress * Math.PI * (isMobile ? 12 : 18);
+            const r = progress * maxTreeRadius * 1.05;
+            const y = treeTopY + progress * availableHeight;
+            const pGroup = { baseAngle: angle, radius: r, baseY: y, particles: [], opacity: 0.9 };
+            pGroup.particles.push(new Particle(0,0,0,0, pGroup, 'ribbon'));
+            nameGroups.push(pGroup);
+        }
+
+        orbitParticles = Array.from({ length: 20 }, () => ({
+            angle: Math.random() * Math.PI * 2,
+            speed: 0.002 + Math.random() * 0.002,
+            y: treeTopY + Math.random() * availableHeight,
+            radius: maxTreeRadius * 1.4,
+            size: Math.random() * 1.5 + 0.5,
+            color: '#ffffff'
+        }));
+
+        if (loading) loading.classList.add('hidden');
+    }
+
+    function getNameParticles(text, parentGroup, fontSize = 20, colorType = 'name') {
+        return new Promise(resolve => {
+            if (!text) return resolve([]);
+            const lines = String(text).split(/\r?\n/);
+            const lineHeight = Math.max(12, Math.floor(fontSize * 1.2));
+            const tempCanvas = document.createElement('canvas');
+            const tCtx = tempCanvas.getContext('2d');
+            
+            const scale = 1.5;
+            tempCanvas.width = 400 * scale;
+            tempCanvas.height = 150 * scale;
+            tCtx.scale(scale, scale);
+            
+            const fontStr = colorType === 'header' ? `400 ${fontSize}px "Great Vibes"` : `bold ${fontSize}px "PingFang TC", "Microsoft JhengHei", Arial`;
+            tCtx.font = fontStr;
+            tCtx.fillStyle = 'white';
+            tCtx.textAlign = 'center';
+            tCtx.textBaseline = 'middle';
+
+            const centerX = 200;
+            const centerY = 75;
+            const offsetStart = -((lines.length - 1) / 2) * lineHeight;
+            for (let i = 0; i < lines.length; i++) {
+                tCtx.fillText(lines[i], centerX, centerY + offsetStart + i * lineHeight);
+            }
+
+            const imageData = tCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height).data;
+            const particles = [];
+            
+            const step = (isMobile && fontSize < 20) ? 3 : 2; 
+            
+            for (let y = 0; y < tempCanvas.height; y += step) {
+                for (let x = 0; x < tempCanvas.width; x += step) {
+                    const idx = (y * tempCanvas.width + x) * 4;
+                    const alpha = imageData[idx + 3];
+                    if (alpha > 128) { 
+                        particles.push(new Particle(
+                            0, 0, 
+                            (x / scale) - 200, 
+                            (y / scale) - 75, 
+                            parentGroup, 
+                            colorType
+                        ));
+                    }
+                }
+            }
+            resolve(particles);
+        });
+    }
+
+    class Snowflake {
+        constructor() { this.reset(); }
+        reset() {
+            this.x = Math.random() * width;
+            this.y = Math.random() * -height;
+            this.size = Math.random() * 2.5 + 1; 
+            this.sy = Math.random() * 1.5 + 1.5; 
+            this.sx = (Math.random() - 0.5) * 1.2;
+            this.opacity = Math.random() * 0.5 + 0.1;
+        }
+        update() {
+            this.y += this.sy;
+            this.x += this.sx;
+            if (this.y > height) this.reset();
+        }
+        draw() {
+            ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+            ctx.beginPath(); ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2); ctx.fill();
+        }
+    }
+
+    function init() {
+        width = canvas.width = window.innerWidth;
+        height = canvas.height = window.innerHeight;
+        isMobile = width < 768;
+        flickeringCount = 0; 
+        snowflakes = Array.from({ length: isMobile ? 180 : 400 }, () => new Snowflake());
+        createTree();
+    }
+
+    let lastTime = 0;
+    function animate(time) {
+        const deltaTime = time - lastTime;
+        lastTime = time;
+
+        ctx.fillStyle = '#010409';
+        ctx.fillRect(0, 0, width, height);
+
+        rotationAngle += 0.006; 
+        snowflakes.forEach(s => { s.update(); s.draw(); });
+
+        orbitParticles.forEach(p => {
+            p.angle += p.speed;
+            const x = width/2 + Math.cos(p.angle) * p.radius;
+            const z = Math.sin(p.angle);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = z > 0 ? 0.3 : 0.08;
+            ctx.beginPath(); ctx.arc(x, p.y, p.size, 0, Math.PI * 2); ctx.fill();
+        });
+
+        ctx.globalAlpha = 1;
+        const allToDraw = [];
+        nameGroups.forEach(group => {
+            if (group.update) group.update(deltaTime); 
+            group.particles.forEach(p => {
+                const z = p.update();
+                allToDraw.push({ p, z });
+            });
+        });
+
+        allToDraw.sort((a, b) => a.z - b.z);
+        
+        ctx.globalCompositeOperation = 'lighter';
+        allToDraw.forEach(item => { item.p.draw(item.z); });
+        ctx.globalCompositeOperation = 'source-over';
+
+        requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', () => { 
+        // 增加小延遲以確保轉向後的寬高獲取準確
+        setTimeout(init, 100); 
+    });
+    window.onload = () => { init(); requestAnimationFrame(animate); };
+</script>
+
+</body>
+</html>
